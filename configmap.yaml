@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-content
+  labels:
+    app: nginx
+    website: Coy
+data:
+  index.html: |
+    <html>
+      <head>
+        <title>Coy's Web Hosting</title>
+      </head>
+      <body>
+        <h1>Welcome to Coy's Web Hosting!</h1>
+        <p>This is a sample web page served by Nginx.</p>
+      </body>
+    </html>
