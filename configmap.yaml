@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: nginx-content
+  name: html-content
   labels:
     app: nginx
     website: Coy
@@ -30,5 +30,4 @@ data:
       color: #666666;
     }
 
-  my_name: "coy like the phish"
-    
+    my_name: "coy like the phish"
