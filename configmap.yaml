@@ -13,6 +13,6 @@ data:
       </head>
       <body>
         <h1>Welcome to Coy's Web Hosting!</h1>
-        <p>This is a sample web page served by Nginx.</p>
+        <p>Coy is the Alpha Male</p>
       </body>
     </html>
