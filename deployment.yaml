@@ -15,14 +15,25 @@ spec:
         app: vibe-hub
     spec:
       containers:
-        - name: vibe-hub-container
-          image: nginx:latest
+        - name: nginx-container
+          image: nginx:alpine
           ports:
             - containerPort: 80
           volumeMounts:
-            - name: html-content
+            - name: volume-html-content
               mountPath: /usr/share/nginx/html
+        - name: git-sync-sidecar
+          image: registry.k8s.io/git-sync/git-sync:v4.2.3
+          args:
+            - --repo=[INSERT YOUR REPO URL]
+            - --ref=main
+            - --root=/tmp/git
+            - --link=content
+            - --period=30s
+            - --one-time=false
+          volumeMounts:
+            - name: volume-html-content
+              mountPath: /tmp/git
       volumes:
-        - name: html-content
-          configMap:
-            name: html-content
+        - name: volume-html-content
+          emptyDir: {}
