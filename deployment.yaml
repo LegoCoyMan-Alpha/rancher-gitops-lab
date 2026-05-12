@@ -11,16 +11,193 @@ metadata:
   namespace: vibe-hub
 data:
   default.conf: |
+    map $http_authorization $auth_header_token {
+      default $http_authorization;
+      "" "";
+    }
+
     server {
       listen 80;
       server_name _;
       root /usr/share/nginx/html/content;
       index index.html;
 
+      location = /healthz {
+        add_header Content-Type text/plain;
+        return 200 'ok';
+      }
+
+      location = /_auth {
+        internal;
+        proxy_pass http://127.0.0.1:8081/validate;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header X-Original-URI $uri;
+        proxy_set_header X-Original-Method $request_method;
+        proxy_set_header X-Original-Token $arg_token;
+        proxy_set_header Authorization $auth_header_token;
+      }
+
       location / {
+        auth_request /_auth;
         try_files $uri $uri/ =404;
       }
     }
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jwt-validator-config
+  namespace: vibe-hub
+data:
+  server.js: |
+    const http = require('http');
+    const path = require('path');
+    const { createPublicKey, verify } = require('crypto');
+
+    const issuer = process.env.JWT_EXPECTED_ISSUER || 'vibe-hub-signer';
+    const audience = process.env.JWT_EXPECTED_AUDIENCE || 'static-html';
+    const clockSkewSeconds = Number(process.env.JWT_CLOCK_SKEW_SECONDS || '30');
+    const publicKeyPem = process.env.JWT_PUBLIC_KEY_PEM;
+
+    if (!publicKeyPem) {
+      throw new Error('JWT_PUBLIC_KEY_PEM is required');
+    }
+
+    const publicKey = createPublicKey(publicKeyPem);
+
+    function decodeBase64Url(value) {
+      const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+      const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+      return Buffer.from(padded, 'base64');
+    }
+
+    function parseJson(segment) {
+      return JSON.parse(decodeBase64Url(segment).toString('utf8'));
+    }
+
+    function normalizePath(value) {
+      const normalized = path.posix.normalize(value || '/');
+      if (!normalized.startsWith('/')) {
+        throw Object.assign(new Error('invalid path'), { statusCode: 403 });
+      }
+      if (normalized.includes('..')) {
+        throw Object.assign(new Error('path traversal'), { statusCode: 403 });
+      }
+      return normalized;
+    }
+
+    function getBearerToken(authorizationHeader) {
+      if (!authorizationHeader) {
+        return '';
+      }
+      const match = authorizationHeader.match(/^Bearer\s+(.+)$/i);
+      return match ? match[1].trim() : '';
+    }
+
+    function verifyJwt(token, requestPath, requestMethod) {
+      const segments = token.split('.');
+      if (segments.length !== 3) {
+        throw Object.assign(new Error('malformed token'), { statusCode: 401 });
+      }
+
+      const [encodedHeader, encodedPayload, encodedSignature] = segments;
+      const header = parseJson(encodedHeader);
+      const payload = parseJson(encodedPayload);
+
+      if (header.alg !== 'EdDSA') {
+        throw Object.assign(new Error('unexpected algorithm'), { statusCode: 401 });
+      }
+
+      const isValidSignature = verify(
+        null,
+        Buffer.from(`${encodedHeader}.${encodedPayload}`),
+        publicKey,
+        decodeBase64Url(encodedSignature)
+      );
+
+      if (!isValidSignature) {
+        throw Object.assign(new Error('invalid signature'), { statusCode: 401 });
+      }
+
+      const now = Math.floor(Date.now() / 1000);
+      if (payload.iss !== issuer) {
+        throw Object.assign(new Error('unexpected issuer'), { statusCode: 401 });
+      }
+
+      const tokenAudience = payload.aud;
+      const audienceMatches = Array.isArray(tokenAudience)
+        ? tokenAudience.includes(audience)
+        : tokenAudience === audience;
+      if (!audienceMatches) {
+        throw Object.assign(new Error('unexpected audience'), { statusCode: 401 });
+      }
+
+      if (typeof payload.exp !== 'number' || payload.exp <= now - clockSkewSeconds) {
+        throw Object.assign(new Error('token expired'), { statusCode: 401 });
+      }
+
+      if (typeof payload.nbf === 'number' && payload.nbf > now + clockSkewSeconds) {
+        throw Object.assign(new Error('token not yet valid'), { statusCode: 401 });
+      }
+
+      if (typeof payload.iat === 'number' && payload.iat > now + clockSkewSeconds) {
+        throw Object.assign(new Error('issued in the future'), { statusCode: 401 });
+      }
+
+      const normalizedRequestPath = normalizePath(requestPath);
+      const normalizedClaimPath = normalizePath(payload.path);
+      if (normalizedRequestPath !== normalizedClaimPath) {
+        throw Object.assign(new Error('path mismatch'), { statusCode: 403 });
+      }
+
+      const claimMethod = String(payload.method || 'GET').toUpperCase();
+      if (claimMethod !== String(requestMethod || 'GET').toUpperCase()) {
+        throw Object.assign(new Error('method mismatch'), { statusCode: 403 });
+      }
+
+      return payload;
+    }
+
+    const server = http.createServer((req, res) => {
+      if (req.url === '/healthz') {
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end('ok');
+        return;
+      }
+
+      if (req.url !== '/validate') {
+        res.writeHead(404);
+        res.end('not found');
+        return;
+      }
+
+      try {
+        const requestPath = req.headers['x-original-uri'];
+        const requestMethod = req.headers['x-original-method'];
+        const token = req.headers['x-original-token'] || getBearerToken(req.headers.authorization);
+
+        if (!requestPath || !requestMethod || !token) {
+          res.writeHead(401);
+          res.end('missing auth context');
+          return;
+        }
+
+        const payload = verifyJwt(token, requestPath, requestMethod);
+        res.writeHead(200, {
+          'X-Auth-Subject': String(payload.sub || ''),
+          'X-Auth-Path': String(payload.path || ''),
+        });
+        res.end('ok');
+      } catch (error) {
+        const statusCode = error.statusCode || 401;
+        res.writeHead(statusCode, { 'Content-Type': 'text/plain' });
+        res.end(statusCode === 403 ? 'forbidden' : 'unauthorized');
+      }
+    });
+
+    server.listen(8081, '0.0.0.0');
 
 ---
 apiVersion: apps/v1
@@ -48,12 +225,47 @@ spec:
           image: nginx:alpine
           ports:
             - containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 80
+            initialDelaySeconds: 3
+            periodSeconds: 10
           volumeMounts:
             - name: volume-html-content
               mountPath: /usr/share/nginx/html
             - name: nginx-site-config
               mountPath: /etc/nginx/conf.d/default.conf
               subPath: default.conf
+        - name: jwt-validator-sidecar
+          image: node:22-alpine
+          command:
+            - node
+            - /app/server.js
+          ports:
+            - containerPort: 8081
+          env:
+            - name: JWT_EXPECTED_ISSUER
+              value: vibe-hub-signer
+            - name: JWT_EXPECTED_AUDIENCE
+              value: static-html
+            - name: JWT_CLOCK_SKEW_SECONDS
+              value: "30"
+            - name: JWT_PUBLIC_KEY_PEM
+              valueFrom:
+                secretKeyRef:
+                  name: jwt-validator-secret
+                  key: publicKeyPem
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          volumeMounts:
+            - name: jwt-validator-config
+              mountPath: /app/server.js
+              subPath: server.js
         - name: git-sync-sidecar
           image: registry.k8s.io/git-sync/git-sync:v4.2.3
           args:
@@ -80,6 +292,9 @@ spec:
         - name: nginx-site-config
           configMap:
             name: nginx-site-config
+        - name: jwt-validator-config
+          configMap:
+            name: jwt-validator-config
         - name: git-ssh-key
           secret:
             secretName: git-ssh-key
