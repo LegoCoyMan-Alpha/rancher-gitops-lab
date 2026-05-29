@@ -1,11 +1,17 @@
 argocd-image-updater:
   config:
-    applicationsAPIKind: argocd
+    logLevel: info
+    registries:
+      - name: Azure Container Registry
+        api_url: https://mycompany.azurecr.io
+        prefix: mycompany.azurecr.io
+        ping: yes
+        credentials: secret:argocd-image-updater/acr-credentials#creds
+        credsexpire: 1h
 
   serviceAccount:
     create: true
+    name: argocd-image-updater
 
   rbac:
     enabled: true
-
-  createClusterRoles: true
