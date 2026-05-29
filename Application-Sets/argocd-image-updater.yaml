@@ -1,0 +1,43 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: platform-argocd-image-updater
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - missingkey=error
+
+  generators:
+    - clusters:
+        selector:
+          matchLabels:
+            bootstrap: "true"
+            install-image-updater: "true"
+
+  template:
+    metadata:
+      name: '{{.metadata.labels.environment}}-argocd-image-updater'
+      labels:
+        environment: '{{.metadata.labels.environment}}'
+        platform-app: argocd-image-updater
+
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/LegoCoyMan-Alpha/HTML-Files.git
+        targetRevision: main
+        path: apps/argocd-image-updater
+        helm:
+          valueFiles:
+            - values.yaml
+            - values-{{.metadata.labels.environment}}.yaml
+      destination:
+        server: '{{.server}}'
+        namespace: argocd-image-updater
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true

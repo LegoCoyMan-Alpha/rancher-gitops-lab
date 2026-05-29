@@ -1,0 +1,4 @@
+argocd-image-updater:
+  extraArgs:
+    - --interval
+    - 1m

@@ -1,0 +1,11 @@
+argocd-image-updater:
+  config:
+    applicationsAPIKind: argocd
+
+  serviceAccount:
+    create: true
+
+  rbac:
+    enabled: true
+
+  createClusterRoles: true
