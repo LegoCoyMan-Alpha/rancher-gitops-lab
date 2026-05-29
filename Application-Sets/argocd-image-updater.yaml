@@ -25,7 +25,7 @@ spec:
     spec:
       project: default
       source:
-        repoURL: https://github.com/LegoCoyMan-Alpha/HTML-Files.git
+        repoURL: https://github.com/LegoCoyMan-Alpha/rancher-gitops-lab.git
         targetRevision: main
         path: apps/argocd-image-updater
         helm:
