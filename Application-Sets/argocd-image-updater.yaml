@@ -27,7 +27,7 @@ spec:
       source:
         repoURL: https://github.com/LegoCoyMan-Alpha/rancher-gitops-lab.git
         targetRevision: main
-        path: apps/argocd-image-updater
+        path: Apps/argocd-image-updater
         helm:
           valueFiles:
             - values.yaml
