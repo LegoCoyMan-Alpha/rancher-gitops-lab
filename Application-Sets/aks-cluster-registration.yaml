@@ -1,0 +1,29 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: aks-cluster-registration
+  namespace: argocd
+  # Prevent Argo CD from deleting cluster secrets when this Application is removed.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/LegoCoyMan-Alpha/AzureK8s.git
+    targetRevision: main
+    # Argo CD watches this path. Terraform writes each cluster secret here.
+    path: manifests/argocd-clusters
+
+  destination:
+    # Apply to the primary (in-cluster) Argo CD instance.
+    server: https://kubernetes.default.svc
+    # Secrets must land in the argocd namespace for cluster auto-registration.
+    namespace: argocd
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
