@@ -10,7 +10,7 @@ spec:
   project: default
 
   source:
-    repoURL: https://github.com/LegoCoyMan-Alpha/AzureK8s.git
+    repoURL: git@github.com:LegoCoyMan-Alpha/AzureK8s.git
     targetRevision: main
     # Argo CD watches this path. Terraform writes each cluster secret here.
     path: manifests/argocd-clusters
