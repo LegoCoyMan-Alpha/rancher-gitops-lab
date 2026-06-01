@@ -17,9 +17,10 @@ spec:
 
   template:
     metadata:
-      name: '{{.metadata.labels.environment}}-argocd-image-updater'
+      name: '{{.name}}-{{.metadata.labels.environment}}-argocd-image-updater'
       labels:
         environment: '{{.metadata.labels.environment}}'
+        cluster-name: '{{.name}}'
         platform-app: argocd-image-updater
 
     spec:
